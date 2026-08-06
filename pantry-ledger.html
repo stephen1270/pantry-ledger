@@ -331,6 +331,29 @@ const STORE_KEY = 'pantry-ledger-products';
 let products = [];
 let currentImages = []; // full-size base64 images for the entry currently being edited
 
+// Use Claude's window.storage when available (inside Claude artifacts);
+// otherwise fall back to localStorage so this file also works standalone
+// (e.g. hosted on GitHub Pages, opened directly in a browser).
+const storage = (typeof window !== 'undefined' && window.storage) ? window.storage : {
+  async get(key){
+    const v = localStorage.getItem(key);
+    if(v === null) throw new Error('not found');
+    return {key, value: v};
+  },
+  async set(key, value){
+    localStorage.setItem(key, value);
+    return {key, value};
+  },
+  async delete(key){
+    localStorage.removeItem(key);
+    return {key, deleted: true};
+  },
+  async list(prefix){
+    const keys = Object.keys(localStorage).filter(k => !prefix || k.startsWith(prefix));
+    return {keys};
+  }
+};
+
 function imagesKey(id){ return 'pantry-ledger-images:' + id; }
 
 function resizeImage(file, maxDim, quality){
@@ -377,7 +400,7 @@ function renderGallery(){
 
 async function load(){
   try{
-    const res = await window.storage.get(STORE_KEY);
+    const res = await storage.get(STORE_KEY);
     products = res ? JSON.parse(res.value) : [];
   }catch(e){
     products = [];
@@ -387,7 +410,7 @@ async function load(){
 
 async function persist(){
   try{
-    await window.storage.set(STORE_KEY, JSON.stringify(products));
+    await storage.set(STORE_KEY, JSON.stringify(products));
   }catch(e){
     console.error('Storage error', e);
     alert('Could not save — please try again.');
@@ -513,7 +536,7 @@ async function openEdit(id){
   document.getElementById('photoHint').textContent = 'Loading photos…';
   if(p.thumb){
     try{
-      const res = await window.storage.get(imagesKey(p.id));
+      const res = await storage.get(imagesKey(p.id));
       currentImages = res ? JSON.parse(res.value) : [];
     }catch(e){
       currentImages = [];
@@ -564,9 +587,9 @@ async function saveEntry(){
 
   try{
     if(currentImages.length){
-      await window.storage.set(imagesKey(id), JSON.stringify(currentImages));
+      await storage.set(imagesKey(id), JSON.stringify(currentImages));
     }else{
-      try{ await window.storage.delete(imagesKey(id)); }catch(e){ /* no images existed, fine */ }
+      try{ await storage.delete(imagesKey(id)); }catch(e){ /* no images existed, fine */ }
     }
   }catch(e){
     console.error('Image storage error', e);
@@ -584,7 +607,7 @@ async function deleteEntry(){
   if(!id) return;
   if(!confirm('Delete this entry?')) return;
   products = products.filter(p=>p.id!==id);
-  try{ await window.storage.delete(imagesKey(id)); }catch(e){ /* fine if none existed */ }
+  try{ await storage.delete(imagesKey(id)); }catch(e){ /* fine if none existed */ }
   await persist();
   closePanel();
   render();
