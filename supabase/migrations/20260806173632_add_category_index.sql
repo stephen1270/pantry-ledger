@@ -1,0 +1,1 @@
+create index if not exists idx_products_category on public.products(category);
