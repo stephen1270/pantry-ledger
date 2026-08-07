@@ -285,7 +285,8 @@
     <div class="row2">
       <div class="field">
         <label>Brand</label>
-        <input type="text" id="f_brand">
+        <input type="text" id="f_brand" list="f_brand_options" autocomplete="off">
+        <datalist id="f_brand_options"></datalist>
       </div>
       <div class="field">
         <label>Category</label>
@@ -296,7 +297,8 @@
     <div class="row2">
       <div class="field">
         <label>Source</label>
-        <input type="text" id="f_source" placeholder="Where bought">
+        <input type="text" id="f_source" list="f_source_options" placeholder="Where bought" autocomplete="off">
+        <datalist id="f_source_options"></datalist>
       </div>
       <div class="field">
         <label>Price</label>
@@ -538,6 +540,12 @@ function uid(){return 'p_' + Date.now() + '_' + Math.random().toString(36).slice
 function allCategories(){
   return [...new Set(products.map(p=>p.category).filter(Boolean))].sort();
 }
+function allBrands(){
+  return [...new Set(products.map(p=>p.brand).filter(Boolean))].sort();
+}
+function allSources(){
+  return [...new Set(products.map(p=>p.source).filter(Boolean))].sort();
+}
 function allTags(){
   return [...new Set(products.flatMap(p=>p.tags||[]))].sort();
 }
@@ -550,8 +558,9 @@ function refreshFilterOptions(){
   tagSel.innerHTML = '<option value="">All tags</option>' + allTags().map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
   catSel.value = curCat; tagSel.value = curTag;
 
-  const catOptions = document.getElementById('f_category_options');
-  catOptions.innerHTML = allCategories().map(c=>`<option value="${esc(c)}">`).join('');
+  document.getElementById('f_category_options').innerHTML = allCategories().map(c=>`<option value="${esc(c)}">`).join('');
+  document.getElementById('f_brand_options').innerHTML = allBrands().map(b=>`<option value="${esc(b)}">`).join('');
+  document.getElementById('f_source_options').innerHTML = allSources().map(s=>`<option value="${esc(s)}">`).join('');
 }
 
 function esc(s){
