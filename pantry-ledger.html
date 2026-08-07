@@ -257,6 +257,20 @@
     background:var(--paper-dim);
   }
   #f_photos{display:none;}
+  .mlist-section{margin-bottom:20px;}
+  .mlist-section h3{
+    font-family:'IBM Plex Mono', monospace;font-size:0.75rem;text-transform:uppercase;
+    letter-spacing:0.06em;color:var(--ink-soft);margin:0 0 8px;
+    border-bottom:1px solid var(--line);padding-bottom:6px;
+  }
+  .mlist-row{
+    display:flex;align-items:center;gap:8px;padding:6px 0;
+    border-bottom:1px solid var(--paper-dim);
+  }
+  .mlist-val{flex:1;font-size:0.9rem;}
+  .mlist-count{font-size:0.7rem;color:var(--ink-soft);white-space:nowrap;}
+  .mlist-empty{font-size:0.8rem;color:var(--ink-soft);font-style:italic;}
+  button.danger{border-color:var(--rust);color:var(--rust);}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
@@ -280,6 +294,7 @@
       <option value="name_asc">Name A–Z</option>
     </select>
     <button id="addBtn">+ Add entry</button>
+    <button class="ghost" id="manageListsBtn">Manage lists</button>
   </div>
 
   <div id="grid" class="grid"></div>
@@ -350,6 +365,19 @@
       <div style="display:flex;gap:8px;margin-left:auto;">
         <button class="ghost" id="cancelBtn">Cancel</button>
         <button id="saveBtn">Save entry</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="manageListsOverlay">
+  <div class="panel">
+    <h2>Manage lists</h2>
+    <div class="hint" style="margin-bottom:16px;">Rename a value to update it everywhere it's used, or delete to clear it from those entries (the entries themselves aren't removed).</div>
+    <div id="manageListsBody"></div>
+    <div class="panel-actions">
+      <div style="display:flex;gap:8px;margin-left:auto;">
+        <button class="ghost" id="closeManageListsBtn">Close</button>
       </div>
     </div>
   </div>
@@ -469,6 +497,8 @@ function applyAuthGating(){
   const loggedIn = !supabaseClient || !!currentUser; // if no Supabase, don't block (local mode)
   const addBtn = document.getElementById('addBtn');
   if(addBtn) addBtn.style.display = loggedIn ? '' : 'none';
+  const manageBtn = document.getElementById('manageListsBtn');
+  if(manageBtn) manageBtn.style.display = loggedIn ? '' : 'none';
   document.querySelectorAll('.card-actions').forEach(el=>{
     el.style.display = loggedIn ? '' : 'none';
   });
@@ -565,6 +595,66 @@ function allSources(){
 }
 function allPackedIn(){
   return [...new Set(products.map(p=>p.packedIn).filter(Boolean))].sort();
+}
+
+// --- Manage lists: rename/delete a category, brand, source, or packed-in
+// value everywhere it's used across your products in one go. ---
+const MANAGEABLE_FIELDS = [
+  { key: 'category', label: 'Categories', getter: allCategories },
+  { key: 'brand', label: 'Brands', getter: allBrands },
+  { key: 'source', label: 'Sources', getter: allSources },
+  { key: 'packedIn', label: 'Packed In', getter: allPackedIn },
+];
+
+function countUsing(key, val){
+  return products.filter(p => (p[key]||'') === val).length;
+}
+
+function renderManageLists(){
+  const wrap = document.getElementById('manageListsBody');
+  wrap.innerHTML = MANAGEABLE_FIELDS.map(f=>{
+    const vals = f.getter();
+    const rows = vals.length
+      ? vals.map(v=>{
+          const count = countUsing(f.key, v);
+          return `<div class="mlist-row">
+            <span class="mlist-val">${esc(v)}</span>
+            <span class="mlist-count">${count} item${count===1?'':'s'}</span>
+            <button class="ghost small" data-action="rename" data-key="${f.key}" data-val="${esc(v)}">Rename</button>
+            <button class="ghost small danger" data-action="delete" data-key="${f.key}" data-val="${esc(v)}">Delete</button>
+          </div>`;
+        }).join('')
+      : `<div class="mlist-empty">No values yet.</div>`;
+    return `<div class="mlist-section"><h3>${f.label}</h3>${rows}</div>`;
+  }).join('');
+}
+
+async function renameListValue(key, oldVal){
+  const newVal = prompt(`Rename "${oldVal}" to:`, oldVal);
+  if(newVal === null) return;
+  const trimmed = newVal.trim();
+  if(!trimmed || trimmed === oldVal) return;
+  products.forEach(p=>{ if((p[key]||'') === oldVal) p[key] = trimmed; });
+  await persist();
+  render();
+  renderManageLists();
+}
+
+async function deleteListValue(key, val){
+  const count = countUsing(key, val);
+  if(!confirm(`Remove "${val}" from ${count} item${count===1?'':'s'}? This clears the field on those entries — it does not delete the entries themselves.`)) return;
+  products.forEach(p=>{ if((p[key]||'') === val) p[key] = ''; });
+  await persist();
+  render();
+  renderManageLists();
+}
+
+function openManageLists(){
+  renderManageLists();
+  document.getElementById('manageListsOverlay').classList.add('open');
+}
+function closeManageLists(){
+  document.getElementById('manageListsOverlay').classList.remove('open');
 }
 function allTags(){
   return [...new Set(products.flatMap(p=>p.tags||[]))].sort();
@@ -813,6 +903,16 @@ async function deleteEntry(){
 }
 
 document.getElementById('addBtn').addEventListener('click', openNew);
+document.getElementById('manageListsBtn').addEventListener('click', openManageLists);
+document.getElementById('closeManageListsBtn').addEventListener('click', closeManageLists);
+document.getElementById('manageListsOverlay').addEventListener('click', e=>{ if(e.target.id==='manageListsOverlay') closeManageLists(); });
+document.getElementById('manageListsBody').addEventListener('click', e=>{
+  const btn = e.target.closest('button[data-action]');
+  if(!btn) return;
+  const { action, key, val } = btn.dataset;
+  if(action === 'rename') renameListValue(key, val);
+  if(action === 'delete') deleteListValue(key, val);
+});
 document.getElementById('cancelBtn').addEventListener('click', closePanel);
 document.getElementById('saveBtn').addEventListener('click', saveEntry);
 document.getElementById('deleteBtn').addEventListener('click', deleteEntry);
