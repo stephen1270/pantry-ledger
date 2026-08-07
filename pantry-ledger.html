@@ -281,7 +281,8 @@
       </div>
       <div class="field">
         <label>Category</label>
-        <input type="text" id="f_category" placeholder="e.g. Condiments">
+        <input type="text" id="f_category" list="f_category_options" placeholder="e.g. Condiments" autocomplete="off">
+        <datalist id="f_category_options"></datalist>
       </div>
     </div>
     <div class="row2">
@@ -479,6 +480,9 @@ function refreshFilterOptions(){
   catSel.innerHTML = '<option value="">All categories</option>' + allCategories().map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
   tagSel.innerHTML = '<option value="">All tags</option>' + allTags().map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
   catSel.value = curCat; tagSel.value = curTag;
+
+  const catOptions = document.getElementById('f_category_options');
+  catOptions.innerHTML = allCategories().map(c=>`<option value="${esc(c)}">`).join('');
 }
 
 function esc(s){
