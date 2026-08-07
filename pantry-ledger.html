@@ -332,6 +332,19 @@
         <input type="text" id="f_price" placeholder="$">
       </div>
     </div>
+    <div class="row2">
+      <div class="field">
+        <label>Weight</label>
+        <input type="number" id="f_weightValue" placeholder="e.g. 110" min="0" step="any">
+      </div>
+      <div class="field">
+        <label>Unit</label>
+        <select id="f_weightUnit">
+          <option value="g">grams (g)</option>
+          <option value="oz">ounces (oz)</option>
+        </select>
+      </div>
+    </div>
     <div class="field" id="packedInField" style="display:none;">
       <label>Packed In</label>
       <input type="text" id="f_packedIn" placeholder="e.g. Olive oil" autocomplete="off">
@@ -584,6 +597,18 @@ async function persist(){
 
 function uid(){return 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);}
 
+const G_PER_OZ = 28.3495231;
+function formatWeight(p){
+  const v = Number(p.weightValue);
+  if(!v || isNaN(v)) return null;
+  if(p.weightUnit === 'oz'){
+    const g = Math.round(v * G_PER_OZ);
+    return `${v}oz (${g}g)`;
+  }
+  const oz = Math.round((v / G_PER_OZ) * 10) / 10;
+  return `${v}g (${oz}oz)`;
+}
+
 function allCategories(){
   return [...new Set(products.map(p=>p.category).filter(Boolean))].sort();
 }
@@ -787,13 +812,14 @@ function render(){
     const packedInTag = p.packedIn ? `<span class="tag">${esc(p.packedIn)}</span>` : '';
     const tags = (p.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('') + packedInTag;
     const thumbHtml = p.thumb ? `<div class="thumbwrap"><img src="${p.thumb}"></div>` : '';
+    const weightStr = formatWeight(p);
     return `
     <div class="card">
       ${badge}
       ${thumbHtml}
       <h3>${esc(p.name)}</h3>
       ${p.brand?`<div class="brand">${esc(p.brand)}</div>`:''}
-      <div class="meta">${[p.category, p.source, p.price?('$'+esc(p.price)):null].filter(Boolean).join(' · ')}</div>
+      <div class="meta">${[p.category, p.source, p.price?('$'+esc(p.price)):null, weightStr].filter(Boolean).join(' · ')}</div>
       ${subrates?`<div class="subrates">${subrates}</div>`:''}
       ${p.notes?`<div class="notes">${esc(p.notes)}</div>`:''}
       ${tags?`<div class="tags">${tags}</div>`:''}
@@ -808,7 +834,8 @@ function render(){
 function openNew(){
   document.getElementById('panelTitle').textContent = 'New entry';
   document.getElementById('editId').value = '';
-  ['f_name','f_brand','f_category','f_source','f_price','f_tags','f_notes','f_overall','f_flavor','f_quality','f_value','f_packedIn'].forEach(id=>document.getElementById(id).value='');
+  ['f_name','f_brand','f_category','f_source','f_price','f_tags','f_notes','f_overall','f_flavor','f_quality','f_value','f_packedIn','f_weightValue'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('f_weightUnit').value = 'g';
   document.getElementById('deleteBtn').style.display='none';
   currentImages = [];
   renderGallery();
@@ -829,6 +856,8 @@ async function openEdit(id){
   togglePackedInField();
   document.getElementById('f_source').value = p.source||'';
   document.getElementById('f_price').value = p.price||'';
+  document.getElementById('f_weightValue').value = (p.weightValue !== null && p.weightValue !== undefined) ? p.weightValue : '';
+  document.getElementById('f_weightUnit').value = p.weightUnit || 'g';
   document.getElementById('f_tags').value = (p.tags||[]).join(', ');
   document.getElementById('f_notes').value = p.notes||'';
   document.getElementById('f_overall').value = p.overall||'';
@@ -880,6 +909,8 @@ async function saveEntry(){
     flavor: numOrNull(document.getElementById('f_flavor').value),
     quality: numOrNull(document.getElementById('f_quality').value),
     value: numOrNull(document.getElementById('f_value').value),
+    weightValue: numOrNull(document.getElementById('f_weightValue').value),
+    weightUnit: document.getElementById('f_weightUnit').value,
     thumb: currentImages[0] || null,
   };
   data.packedIn = (data.category.toLowerCase() === 'tinned fish')
