@@ -611,6 +611,7 @@ function setupAutocomplete(inputId, listId){
     const opt = e.target.closest('[data-val]');
     if(!opt) return;
     input.value = opt.dataset.val;
+    input.dispatchEvent(new Event('input', { bubbles: true })); // so listeners like the Packed In toggle fire on click-select too
     hide();
   });
 }
