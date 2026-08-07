@@ -239,6 +239,7 @@
   }
   #f_photos{display:none;}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -331,10 +332,14 @@ const STORE_KEY = 'pantry-ledger-products';
 let products = [];
 let currentImages = []; // full-size base64 images for the entry currently being edited
 
-// Use Claude's window.storage when available (inside Claude artifacts);
-// otherwise fall back to localStorage so this file also works standalone
-// (e.g. hosted on GitHub Pages, opened directly in a browser).
-const storage = (typeof window !== 'undefined' && window.storage) ? window.storage : {
+// Supabase-backed storage, so entries sync across devices instead of being
+// trapped in one browser's localStorage. Falls back to localStorage if
+// Supabase can't be reached (e.g. offline), and to Claude's window.storage
+// when running inside a Claude artifact.
+const SUPABASE_URL = 'https://psbdjeyianlhfkgwwsvt.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_fmEJD4dXEZF0elMTqgfhIg_nH-dCQn_';
+
+const localStorageAdapter = {
   async get(key){
     const v = localStorage.getItem(key);
     if(v === null) throw new Error('not found');
@@ -353,6 +358,47 @@ const storage = (typeof window !== 'undefined' && window.storage) ? window.stora
     return {keys};
   }
 };
+
+function makeSupabaseAdapter(){
+  if(typeof window === 'undefined' || !window.supabase || !window.supabase.createClient){
+    return null;
+  }
+  const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  return {
+    async get(key){
+      const { data, error } = await client.from('kv_store').select('value').eq('key', key).maybeSingle();
+      if(error) throw error;
+      if(!data) throw new Error('not found');
+      // keep a local mirror so the app still works offline
+      try{ localStorage.setItem(key, data.value); }catch(e){}
+      return {key, value: data.value};
+    },
+    async set(key, value){
+      const { error } = await client.from('kv_store').upsert({ key, value, updated_at: new Date().toISOString() });
+      if(error) throw error;
+      try{ localStorage.setItem(key, value); }catch(e){}
+      return {key, value};
+    },
+    async delete(key){
+      const { error } = await client.from('kv_store').delete().eq('key', key);
+      if(error) throw error;
+      try{ localStorage.removeItem(key); }catch(e){}
+      return {key, deleted: true};
+    },
+    async list(prefix){
+      let query = client.from('kv_store').select('key');
+      if(prefix) query = query.like('key', prefix + '%');
+      const { data, error } = await query;
+      if(error) throw error;
+      return { keys: (data||[]).map(r => r.key) };
+    }
+  };
+}
+
+// Priority: Claude artifact storage > Supabase > localStorage
+const storage = (typeof window !== 'undefined' && window.storage)
+  ? window.storage
+  : (makeSupabaseAdapter() || localStorageAdapter);
 
 function imagesKey(id){ return 'pantry-ledger-images:' + id; }
 
