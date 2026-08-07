@@ -933,16 +933,13 @@ function render(){
     const packedInTag = p.packedIn ? `<span class="tag">${esc(p.packedIn)}</span>` : '';
     const tags = (p.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('') + packedInTag;
     const thumbHtml = p.thumb ? `<div class="thumbwrap"><img src="${p.thumb}"></div>` : '';
-    // fall back to the old single "weightValue/weightUnit" fields for entries saved before Net/Dry split
-    const netWeightStr = formatWeight(p.netWeightValue ?? p.weightValue, p.netWeightUnit ?? p.weightUnit, p.dryWeightValue ? 'Net' : null);
-    const dryWeightStr = formatWeight(p.dryWeightValue, p.dryWeightUnit, 'Dry');
     return `
     <div class="card">
       ${badge}
       ${thumbHtml}
       <h3>${esc(p.name)}</h3>
       ${p.brand?`<div class="brand">${esc(p.brand)}</div>`:''}
-      <div class="meta">${[p.category, p.source, p.price?('$'+esc(p.price)):null, dryWeightStr, netWeightStr].filter(Boolean).join(' · ')}</div>
+      <div class="meta">${[p.category, p.source, p.price?('$'+esc(p.price)):null].filter(Boolean).join(' · ')}</div>
       ${subrates?`<div class="subrates">${subrates}</div>`:''}
       ${p.notes?`<div class="notes">${esc(p.notes)}</div>`:''}
       ${tags?`<div class="tags">${tags}</div>`:''}
