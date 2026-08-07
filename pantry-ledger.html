@@ -317,6 +317,11 @@
         <input type="text" id="f_price" placeholder="$">
       </div>
     </div>
+    <div class="field" id="packedInField" style="display:none;">
+      <label>Packed In</label>
+      <input type="text" id="f_packedIn" placeholder="e.g. Olive oil" autocomplete="off">
+      <div class="autocomplete-list" id="f_packedIn_options"></div>
+    </div>
     <div class="field">
       <label>Tags (comma separated)</label>
       <input type="text" id="f_tags" placeholder="fermented, japanese, spicy">
@@ -558,6 +563,9 @@ function allBrands(){
 function allSources(){
   return [...new Set(products.map(p=>p.source).filter(Boolean))].sort();
 }
+function allPackedIn(){
+  return [...new Set(products.map(p=>p.packedIn).filter(Boolean))].sort();
+}
 function allTags(){
   return [...new Set(products.flatMap(p=>p.tags||[]))].sort();
 }
@@ -573,6 +581,7 @@ function refreshFilterOptions(){
   document.getElementById('f_category_options').dataset.options = JSON.stringify(allCategories());
   document.getElementById('f_brand_options').dataset.options = JSON.stringify(allBrands());
   document.getElementById('f_source_options').dataset.options = JSON.stringify(allSources());
+  document.getElementById('f_packedIn_options').dataset.options = JSON.stringify(allPackedIn());
 }
 
 // Custom autocomplete dropdown (replaces native <datalist>, which Safari
@@ -608,6 +617,13 @@ function setupAutocomplete(inputId, listId){
 setupAutocomplete('f_category', 'f_category_options');
 setupAutocomplete('f_brand', 'f_brand_options');
 setupAutocomplete('f_source', 'f_source_options');
+setupAutocomplete('f_packedIn', 'f_packedIn_options');
+
+function togglePackedInField(){
+  const cat = document.getElementById('f_category').value.trim().toLowerCase();
+  document.getElementById('packedInField').style.display = (cat === 'tinned fish') ? '' : 'none';
+}
+document.getElementById('f_category').addEventListener('input', togglePackedInField);
 
 function esc(s){
   return (s||'').toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -657,7 +673,8 @@ function render(){
       p.quality?`Qu ${p.quality}`:null,
       p.value?`Va ${p.value}`:null
     ].filter(Boolean).join(' · ');
-    const tags = (p.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('');
+    const packedInTag = p.packedIn ? `<span class="tag">${esc(p.packedIn)}</span>` : '';
+    const tags = (p.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('') + packedInTag;
     const thumbHtml = p.thumb ? `<div class="thumbwrap"><img src="${p.thumb}"></div>` : '';
     return `
     <div class="card">
@@ -680,10 +697,11 @@ function render(){
 function openNew(){
   document.getElementById('panelTitle').textContent = 'New entry';
   document.getElementById('editId').value = '';
-  ['f_name','f_brand','f_category','f_source','f_price','f_tags','f_notes','f_overall','f_flavor','f_quality','f_value'].forEach(id=>document.getElementById(id).value='');
+  ['f_name','f_brand','f_category','f_source','f_price','f_tags','f_notes','f_overall','f_flavor','f_quality','f_value','f_packedIn'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('deleteBtn').style.display='none';
   currentImages = [];
   renderGallery();
+  togglePackedInField();
   document.getElementById('overlay').classList.add('open');
   document.getElementById('f_name').focus();
 }
@@ -696,6 +714,8 @@ async function openEdit(id){
   document.getElementById('f_name').value = p.name||'';
   document.getElementById('f_brand').value = p.brand||'';
   document.getElementById('f_category').value = p.category||'';
+  document.getElementById('f_packedIn').value = p.packedIn||'';
+  togglePackedInField();
   document.getElementById('f_source').value = p.source||'';
   document.getElementById('f_price').value = p.price||'';
   document.getElementById('f_tags').value = (p.tags||[]).join(', ');
@@ -751,6 +771,9 @@ async function saveEntry(){
     value: numOrNull(document.getElementById('f_value').value),
     thumb: currentImages[0] || null,
   };
+  data.packedIn = (data.category.toLowerCase() === 'tinned fish')
+    ? document.getElementById('f_packedIn').value.trim()
+    : '';
 
   if(id){
     const idx = products.findIndex(p=>p.id===id);
