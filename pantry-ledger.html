@@ -275,6 +275,7 @@
   button.danger{border-color:var(--rust);color:var(--rust);}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -296,6 +297,7 @@
       <option value="name_asc">Name A–Z</option>
     </select>
     <button id="addBtn">+ Add entry</button>
+    <button class="ghost" id="scanBtn">📷 Scan barcode</button>
     <button class="ghost" id="manageListsBtn">Manage lists</button>
   </div>
 
@@ -307,6 +309,10 @@
   <div class="panel">
     <h2 id="panelTitle">New entry</h2>
     <input type="hidden" id="editId">
+    <div class="field" id="barcodeField" style="display:none;">
+      <label>Barcode</label>
+      <input type="text" id="f_barcode" placeholder="Scanned barcode">
+    </div>
     <div class="field">
       <label>Name *</label>
       <input type="text" id="f_name" placeholder="e.g. Yuzu Kosho">
@@ -336,12 +342,12 @@
     </div>
     <div class="row2">
       <div class="field">
-        <label>Net Weight</label>
-        <input type="number" id="f_netWeightValue" placeholder="e.g. 110" min="0" step="any">
+        <label>Dry Weight</label>
+        <input type="number" id="f_dryWeightValue" placeholder="e.g. 77" min="0" step="any">
       </div>
       <div class="field">
-        <label>Net Weight Unit</label>
-        <select id="f_netWeightUnit">
+        <label>Dry Weight Unit</label>
+        <select id="f_dryWeightUnit">
           <option value="g">grams (g)</option>
           <option value="oz">ounces (oz)</option>
         </select>
@@ -349,12 +355,12 @@
     </div>
     <div class="row2">
       <div class="field">
-        <label>Dry Weight</label>
-        <input type="number" id="f_dryWeightValue" placeholder="e.g. 77" min="0" step="any">
+        <label>Net Weight</label>
+        <input type="number" id="f_netWeightValue" placeholder="e.g. 110" min="0" step="any">
       </div>
       <div class="field">
-        <label>Dry Weight Unit</label>
-        <select id="f_dryWeightUnit">
+        <label>Net Weight Unit</label>
+        <select id="f_netWeightUnit">
           <option value="g">grams (g)</option>
           <option value="oz">ounces (oz)</option>
         </select>
@@ -406,6 +412,19 @@
     <div class="panel-actions">
       <div style="display:flex;gap:8px;margin-left:auto;">
         <button class="ghost" id="closeManageListsBtn">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="scannerOverlay">
+  <div class="panel" style="max-width:420px;">
+    <h2>Scan barcode</h2>
+    <div class="hint" id="scannerStatus">Point your camera at the barcode.</div>
+    <video id="scannerVideo" playsinline muted style="width:100%;border-radius:5px;margin:12px 0;background:#000;"></video>
+    <div class="panel-actions">
+      <div style="display:flex;gap:8px;margin-left:auto;">
+        <button class="ghost" id="cancelScanBtn">Cancel</button>
       </div>
     </div>
   </div>
@@ -527,6 +546,8 @@ function applyAuthGating(){
   if(addBtn) addBtn.style.display = loggedIn ? '' : 'none';
   const manageBtn = document.getElementById('manageListsBtn');
   if(manageBtn) manageBtn.style.display = loggedIn ? '' : 'none';
+  const scanBtn = document.getElementById('scanBtn');
+  if(scanBtn) scanBtn.style.display = loggedIn ? '' : 'none';
   document.querySelectorAll('.card-actions').forEach(el=>{
     el.style.display = loggedIn ? '' : 'none';
   });
@@ -611,6 +632,90 @@ async function persist(){
 }
 
 function uid(){return 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);}
+
+// --- Barcode scanning: uses the device camera to read a barcode, then
+// looks up basic product info from Open Food Facts to pre-fill the form.
+// Coverage is best-effort — small/artisanal brands often aren't in that
+// database, in which case you just fill the form in manually as usual. ---
+let scannerReader = null;
+
+function parseWeightFromQuantity(qtyStr){
+  if(!qtyStr) return null;
+  let m = qtyStr.match(/([\d.]+)\s*(g|grams?)\b/i);
+  if(m) return { value: parseFloat(m[1]), unit: 'g' };
+  m = qtyStr.match(/([\d.]+)\s*(kg|kilograms?)\b/i);
+  if(m) return { value: Math.round(parseFloat(m[1]) * 1000), unit: 'g' };
+  m = qtyStr.match(/([\d.]+)\s*(oz|ounces?)\b/i);
+  if(m) return { value: parseFloat(m[1]), unit: 'oz' };
+  return null;
+}
+
+async function lookupBarcodeInfo(code){
+  try{
+    const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json`);
+    const json = await res.json();
+    if(json.status !== 1 || !json.product) return null;
+    const p = json.product;
+    const w = parseWeightFromQuantity(p.quantity);
+    return {
+      name: p.product_name || '',
+      brand: (p.brands || '').split(',')[0].trim(),
+      netWeightValue: w ? w.value : null,
+      netWeightUnit: w ? w.unit : 'g',
+    };
+  }catch(e){
+    console.error('Barcode lookup failed', e);
+    return null;
+  }
+}
+
+async function processScannedBarcode(code){
+  const existing = products.find(p=>p.barcode===code);
+  if(existing){
+    closeScanner();
+    openEdit(existing.id);
+    return;
+  }
+  const statusEl = document.getElementById('scannerStatus');
+  if(statusEl) statusEl.textContent = 'Looking up product…';
+  const info = await lookupBarcodeInfo(code);
+  closeScanner();
+  openNew(Object.assign({ barcode: code }, info || {}));
+  if(!info){
+    setTimeout(()=>alert("No product info found for that barcode — go ahead and fill it in manually. (The barcode is still saved with this entry.)"), 200);
+  }
+}
+
+function openScanner(){
+  const statusEl = document.getElementById('scannerStatus');
+  statusEl.textContent = 'Point your camera at the barcode.';
+  document.getElementById('scannerOverlay').classList.add('open');
+  if(typeof ZXing === 'undefined'){
+    statusEl.textContent = 'Barcode scanner failed to load — check your connection and try again.';
+    return;
+  }
+  scannerReader = new ZXing.BrowserMultiFormatReader();
+  scannerReader.decodeFromVideoDevice(undefined, 'scannerVideo', (result, err)=>{
+    if(result){
+      const code = result.getText();
+      stopScannerCamera(); // stop the camera feed but leave the overlay open for the lookup status
+      processScannedBarcode(code);
+    }
+    // err fires continuously for each frame with no barcode found — that's normal, ignore it
+  }).catch(e=>{
+    statusEl.textContent = 'Could not access camera: ' + e.message;
+  });
+}
+function stopScannerCamera(){
+  if(scannerReader){
+    try{ scannerReader.reset(); }catch(e){}
+    scannerReader = null;
+  }
+}
+function closeScanner(){
+  stopScannerCamera();
+  document.getElementById('scannerOverlay').classList.remove('open');
+}
 
 const G_PER_OZ = 28.3495231;
 function formatWeight(value, unit, label){
@@ -849,16 +954,27 @@ function render(){
   applyAuthGating();
 }
 
-function openNew(){
+function openNew(prefill){
+  prefill = prefill || {};
   document.getElementById('panelTitle').textContent = 'New entry';
   document.getElementById('editId').value = '';
-  ['f_name','f_brand','f_category','f_source','f_price','f_tags','f_notes','f_overall','f_flavor','f_quality','f_value','f_packedIn','f_netWeightValue','f_dryWeightValue'].forEach(id=>document.getElementById(id).value='');
+  ['f_name','f_brand','f_category','f_source','f_price','f_tags','f_notes','f_overall','f_flavor','f_quality','f_value','f_packedIn','f_netWeightValue','f_dryWeightValue','f_barcode'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('f_netWeightUnit').value = 'g';
   document.getElementById('f_dryWeightUnit').value = 'g';
   document.getElementById('deleteBtn').style.display='none';
   currentImages = [];
   renderGallery();
+
+  if(prefill.name) document.getElementById('f_name').value = prefill.name;
+  if(prefill.brand) document.getElementById('f_brand').value = prefill.brand;
+  if(prefill.netWeightValue){
+    document.getElementById('f_netWeightValue').value = prefill.netWeightValue;
+    document.getElementById('f_netWeightUnit').value = prefill.netWeightUnit || 'g';
+  }
+  document.getElementById('f_barcode').value = prefill.barcode || '';
+  document.getElementById('barcodeField').style.display = prefill.barcode ? '' : 'none';
   togglePackedInField();
+
   document.getElementById('overlay').classList.add('open');
   document.getElementById('f_name').focus();
 }
@@ -879,6 +995,8 @@ async function openEdit(id){
   document.getElementById('f_netWeightUnit').value = p.netWeightUnit || p.weightUnit || 'g';
   document.getElementById('f_dryWeightValue').value = (p.dryWeightValue !== null && p.dryWeightValue !== undefined) ? p.dryWeightValue : '';
   document.getElementById('f_dryWeightUnit').value = p.dryWeightUnit || 'g';
+  document.getElementById('f_barcode').value = p.barcode || '';
+  document.getElementById('barcodeField').style.display = p.barcode ? '' : 'none';
   document.getElementById('f_tags').value = (p.tags||[]).join(', ');
   document.getElementById('f_notes').value = p.notes||'';
   document.getElementById('f_overall').value = p.overall||'';
@@ -934,6 +1052,7 @@ async function saveEntry(){
     netWeightUnit: document.getElementById('f_netWeightUnit').value,
     dryWeightValue: numOrNull(document.getElementById('f_dryWeightValue').value),
     dryWeightUnit: document.getElementById('f_dryWeightUnit').value,
+    barcode: document.getElementById('f_barcode').value.trim() || null,
     thumb: currentImages[0] || null,
   };
   data.packedIn = (data.category.toLowerCase() === 'tinned fish')
@@ -979,6 +1098,9 @@ async function deleteEntry(){
 document.getElementById('addBtn').addEventListener('click', openNew);
 document.getElementById('manageListsBtn').addEventListener('click', openManageLists);
 document.getElementById('closeManageListsBtn').addEventListener('click', closeManageLists);
+document.getElementById('scanBtn').addEventListener('click', openScanner);
+document.getElementById('cancelScanBtn').addEventListener('click', closeScanner);
+document.getElementById('scannerOverlay').addEventListener('click', e=>{ if(e.target.id==='scannerOverlay') closeScanner(); });
 document.getElementById('manageListsOverlay').addEventListener('click', e=>{ if(e.target.id==='manageListsOverlay') closeManageLists(); });
 document.getElementById('manageListsBody').addEventListener('click', e=>{
   const btn = e.target.closest('button[data-action]');
