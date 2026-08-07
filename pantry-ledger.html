@@ -85,6 +85,13 @@
   }
   button.ghost{background:transparent;color:var(--ink);}
   button.small{padding:5px 10px;font-size:0.7rem;}
+  .auth-control{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:0.75rem;color:var(--ink-soft);}
+  .auth-control input[type=email], .auth-control input[type=password]{
+    padding:5px 8px;font-size:0.75rem;border:1px solid var(--line);border-radius:4px;
+    background:var(--paper);color:var(--ink);width:130px;
+  }
+  .auth-control form{display:flex;gap:6px;align-items:center;}
+  .auth-error{color:var(--rust);font-size:0.7rem;}
   button:hover{opacity:0.85;}
 
   .grid{
@@ -246,6 +253,7 @@
   <header>
     <h1>Pantry Ledger</h1>
     <div class="tally" id="tally">0 entries</div>
+    <div id="authControl" class="auth-control"></div>
   </header>
 
   <div class="toolbar">
@@ -360,11 +368,14 @@ const localStorageAdapter = {
   }
 };
 
+let supabaseClient = null;
+
 function makeSupabaseAdapter(){
   if(typeof window === 'undefined' || !window.supabase || !window.supabase.createClient){
     return null;
   }
-  const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const client = supabaseClient;
   return {
     async get(key){
       const { data, error } = await client.from('kv_store').select('value').eq('key', key).maybeSingle();
@@ -400,6 +411,64 @@ function makeSupabaseAdapter(){
 const storage = (typeof window !== 'undefined' && window.storage)
   ? window.storage
   : (makeSupabaseAdapter() || localStorageAdapter);
+
+// --- Auth: read is public, only a signed-in session can add/edit/delete ---
+let currentUser = null;
+
+function renderAuthControl(){
+  const el = document.getElementById('authControl');
+  if(!supabaseClient){
+    el.innerHTML = ''; // no Supabase (local/offline mode) — no gating possible, leave open
+    return;
+  }
+  if(currentUser){
+    el.innerHTML = `
+      <span>${esc(currentUser.email)}</span>
+      <button class="ghost small" id="signOutBtn">Sign out</button>`;
+    document.getElementById('signOutBtn').addEventListener('click', async ()=>{
+      await supabaseClient.auth.signOut();
+    });
+  } else {
+    el.innerHTML = `
+      <form id="signInForm">
+        <input type="email" id="authEmail" placeholder="Email" required>
+        <input type="password" id="authPassword" placeholder="Password" required>
+        <button class="ghost small" type="submit">Sign in</button>
+      </form>
+      <span class="auth-error" id="authError"></span>`;
+    document.getElementById('signInForm').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      const email = document.getElementById('authEmail').value.trim();
+      const password = document.getElementById('authPassword').value;
+      const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      document.getElementById('authError').textContent = error ? 'Sign in failed' : '';
+    });
+  }
+}
+
+function applyAuthGating(){
+  const loggedIn = !supabaseClient || !!currentUser; // if no Supabase, don't block (local mode)
+  const addBtn = document.getElementById('addBtn');
+  if(addBtn) addBtn.style.display = loggedIn ? '' : 'none';
+  document.querySelectorAll('.card-actions').forEach(el=>{
+    el.style.display = loggedIn ? '' : 'none';
+  });
+}
+
+if(supabaseClient){
+  supabaseClient.auth.getSession().then(({data})=>{
+    currentUser = data.session ? data.session.user : null;
+    renderAuthControl();
+    applyAuthGating();
+  });
+  supabaseClient.auth.onAuthStateChange((_event, session)=>{
+    currentUser = session ? session.user : null;
+    renderAuthControl();
+    applyAuthGating();
+  });
+} else {
+  renderAuthControl();
+}
 
 function imagesKey(id){ return 'pantry-ledger-images:' + id; }
 
@@ -550,6 +619,7 @@ function render(){
       </div>
     </div>`;
   }).join('');
+  applyAuthGating();
 }
 
 function openNew(){
