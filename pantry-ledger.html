@@ -597,17 +597,19 @@ function allPackedIn(){
   return [...new Set(products.map(p=>p.packedIn).filter(Boolean))].sort();
 }
 
-// --- Manage lists: rename/delete a category, brand, source, or packed-in
-// value everywhere it's used across your products in one go. ---
+// --- Manage lists: rename/delete a category, brand, source, packed-in,
+// or tag value everywhere it's used across your products in one go. ---
 const MANAGEABLE_FIELDS = [
-  { key: 'category', label: 'Categories', getter: allCategories },
-  { key: 'brand', label: 'Brands', getter: allBrands },
-  { key: 'source', label: 'Sources', getter: allSources },
-  { key: 'packedIn', label: 'Packed In', getter: allPackedIn },
+  { key: 'category', label: 'Categories', getter: allCategories, type: 'scalar' },
+  { key: 'brand', label: 'Brands', getter: allBrands, type: 'scalar' },
+  { key: 'source', label: 'Sources', getter: allSources, type: 'scalar' },
+  { key: 'packedIn', label: 'Packed In', getter: allPackedIn, type: 'scalar' },
+  { key: 'tags', label: 'Tags', getter: allTags, type: 'array' },
 ];
 
-function countUsing(key, val){
-  return products.filter(p => (p[key]||'') === val).length;
+function countUsing(field, val){
+  if(field.type === 'array') return products.filter(p => (p.tags||[]).includes(val)).length;
+  return products.filter(p => (p[field.key]||'') === val).length;
 }
 
 function renderManageLists(){
@@ -616,12 +618,12 @@ function renderManageLists(){
     const vals = f.getter();
     const rows = vals.length
       ? vals.map(v=>{
-          const count = countUsing(f.key, v);
+          const count = countUsing(f, v);
           return `<div class="mlist-row">
             <span class="mlist-val">${esc(v)}</span>
             <span class="mlist-count">${count} item${count===1?'':'s'}</span>
-            <button class="ghost small" data-action="rename" data-key="${f.key}" data-val="${esc(v)}">Rename</button>
-            <button class="ghost small danger" data-action="delete" data-key="${f.key}" data-val="${esc(v)}">Delete</button>
+            <button class="ghost small" data-action="rename" data-type="${f.type}" data-key="${f.key}" data-val="${esc(v)}">Rename</button>
+            <button class="ghost small danger" data-action="delete" data-type="${f.type}" data-key="${f.key}" data-val="${esc(v)}">Delete</button>
           </div>`;
         }).join('')
       : `<div class="mlist-empty">No values yet.</div>`;
@@ -629,21 +631,33 @@ function renderManageLists(){
   }).join('');
 }
 
-async function renameListValue(key, oldVal){
+async function renameListValue(type, key, oldVal){
   const newVal = prompt(`Rename "${oldVal}" to:`, oldVal);
   if(newVal === null) return;
-  const trimmed = newVal.trim();
+  const trimmed = type === 'array' ? newVal.trim().toLowerCase() : newVal.trim();
   if(!trimmed || trimmed === oldVal) return;
-  products.forEach(p=>{ if((p[key]||'') === oldVal) p[key] = trimmed; });
+  if(type === 'array'){
+    products.forEach(p=>{
+      if(!p.tags || !p.tags.includes(oldVal)) return;
+      p.tags = [...new Set(p.tags.map(t => t===oldVal ? trimmed : t))]; // dedupe in case renamed tag already exists
+    });
+  } else {
+    products.forEach(p=>{ if((p[key]||'') === oldVal) p[key] = trimmed; });
+  }
   await persist();
   render();
   renderManageLists();
 }
 
-async function deleteListValue(key, val){
-  const count = countUsing(key, val);
-  if(!confirm(`Remove "${val}" from ${count} item${count===1?'':'s'}? This clears the field on those entries — it does not delete the entries themselves.`)) return;
-  products.forEach(p=>{ if((p[key]||'') === val) p[key] = ''; });
+async function deleteListValue(type, key, val){
+  const field = MANAGEABLE_FIELDS.find(f=>f.key===key);
+  const count = countUsing(field, val);
+  if(!confirm(`Remove "${val}" from ${count} item${count===1?'':'s'}? This clears it from those entries — it does not delete the entries themselves.`)) return;
+  if(type === 'array'){
+    products.forEach(p=>{ if(p.tags) p.tags = p.tags.filter(t=>t!==val); });
+  } else {
+    products.forEach(p=>{ if((p[key]||'') === val) p[key] = ''; });
+  }
   await persist();
   render();
   renderManageLists();
@@ -909,9 +923,9 @@ document.getElementById('manageListsOverlay').addEventListener('click', e=>{ if(
 document.getElementById('manageListsBody').addEventListener('click', e=>{
   const btn = e.target.closest('button[data-action]');
   if(!btn) return;
-  const { action, key, val } = btn.dataset;
-  if(action === 'rename') renameListValue(key, val);
-  if(action === 'delete') deleteListValue(key, val);
+  const { action, type, key, val } = btn.dataset;
+  if(action === 'rename') renameListValue(type, key, val);
+  if(action === 'delete') deleteListValue(type, key, val);
 });
 document.getElementById('cancelBtn').addEventListener('click', closePanel);
 document.getElementById('saveBtn').addEventListener('click', saveEntry);
